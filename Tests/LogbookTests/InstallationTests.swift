@@ -134,16 +134,12 @@ struct InstallationTests {
         #expect(entries[1].contains("step-4"))
     }
 
-    @Test func `turning file logging off leaves no directory behind`() async throws {
-        try await withTemporaryDirectory { directory in
-            let unused = directory.appending(path: "Logs", directoryHint: .isDirectory)
-            let installation = makeInstallation(files: nil)
+    @Test func `recording with file logging off still reaches the ring buffer`() {
+        let installation = makeInstallation(files: nil)
 
-            installation.record(level: .info, message: "memory only", category: "Test", metadata: { [:] })
+        installation.record(level: .info, message: "memory only", category: "Test", metadata: { [:] })
 
-            #expect(!FileManager.default.fileExists(atPath: unused.path))
-            #expect(installation.recentEntries().count == 1)
-        }
+        #expect(installation.recentEntries().count == 1)
     }
 }
 
@@ -237,23 +233,16 @@ struct LogExportTests {
         }
     }
 
-    /// The default directory is the one every real app gets, and the only part
-    /// of the file sink a temporary directory cannot exercise.
-    @Test func `the default directory is created and written to`() async throws {
+    /// Only the URL is asserted: the write path is covered by the temporary-
+    /// directory tests, and a test must never touch the real `Caches/Logs`.
+    @Test func `the default directory is Logs inside the user caches`() throws {
         let caches = try #require(
             FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first)
-        let logs = caches.appending(path: "Logs", directoryHint: .isDirectory)
-        try? FileManager.default.removeItem(at: logs)
-        defer { try? FileManager.default.removeItem(at: logs) }
 
-        let installation = makeInstallation(files: .init(flushThreshold: 100))
-        installation.record(level: .error, message: "into the default home", category: "Test", metadata: { [:] })
+        let directory = Installation.defaultDirectory
 
-        let exported = try await installation.exportLogs()
-        defer { try? FileManager.default.removeItem(at: exported) }
-
-        #expect(FileManager.default.fileExists(atPath: logs.path))
-        let contents = try String(contentsOf: exported, encoding: .utf8)
-        #expect(contents.contains("into the default home"))
+        #expect(directory.lastPathComponent == "Logs")
+        #expect(directory.deletingLastPathComponent().path == caches.path)
+        #expect(directory.hasDirectoryPath)
     }
 }

@@ -86,7 +86,10 @@ final class Installation: Sendable {
 
     // MARK: - Private
 
-    private static var defaultDirectory: URL {
+    /// `Logs` under the user caches, so the system may reclaim log space when
+    /// storage runs short. Falls back to the temporary directory in the rare
+    /// containers that expose no caches at all.
+    static var defaultDirectory: URL {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return caches.appending(path: "Logs", directoryHint: .isDirectory)
