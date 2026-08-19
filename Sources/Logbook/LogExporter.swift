@@ -15,7 +15,10 @@ struct LogExporter: Sendable {
         self.name = subsystem.split(separator: ".").last.map(String.init) ?? subsystem
     }
 
-    func export() async throws -> URL {
+    /// `@concurrent` pins the chunked read/write loop off the caller's
+    /// isolation, so a "share logs" tap never stalls the main actor even if
+    /// the package later adopts `NonisolatedNonsendingByDefault`.
+    @concurrent func export() async throws -> URL {
         await buffer.flush()
 
         let sources = await writer.fileURLs()
