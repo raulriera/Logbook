@@ -155,7 +155,7 @@ struct LogExportTests {
             installation.record(level: .error, message: "second", category: "Test", metadata: { [:] })
 
             let exported = try await installation.exportLogs()
-            defer { try? FileManager.default.removeItem(at: exported) }
+            defer { try? FileManager.default.removeItem(at: exported.deletingLastPathComponent()) }
 
             let contents = try String(contentsOf: exported, encoding: .utf8)
             #expect(contents.contains("first"))
@@ -211,7 +211,7 @@ struct LogExportTests {
             }
 
             let exported = try await installation.exportLogs()
-            defer { try? FileManager.default.removeItem(at: exported) }
+            defer { try? FileManager.default.removeItem(at: exported.deletingLastPathComponent()) }
 
             // The wraparound truncated the oldest line; the rest read in order.
             let contents = try String(contentsOf: exported, encoding: .utf8)
@@ -225,25 +225,24 @@ struct LogExportTests {
     }
 
     /// The stamp in an export's name is only good to the second, so two exports
-    /// close together would otherwise land on one path and the first would go.
+    /// close together land on one name — and must still be two files.
     @Test func `two exports in the same second are two files`() async throws {
         try await withTemporaryDirectory { directory in
-            let installation = makeInstallation(files: .init(directory: directory, flushThreshold: 100))
-            installation.record(level: .info, message: "shared", category: "Test", metadata: { [:] })
+            let writer = FileWriter(directory: directory, maxFileSize: 10_000, maxFileCount: 3)
+            let buffer = FileWriteBuffer(writer: writer, flushThreshold: 100)
+            buffer.append("[INFO] shared\n")
+            let exporter = LogExporter(
+                subsystem: "com.example.Test",
+                writer: writer,
+                buffer: buffer,
+                now: { Date(timeIntervalSince1970: 1_774_521_135) }
+            )
 
-            // The pair can straddle a second boundary; retry until both land
-            // inside one, so the name collision under test actually occurs.
-            var first = try await installation.exportLogs()
-            var second = try await installation.exportLogs()
-            var attempts = 0
-            while first.lastPathComponent != second.lastPathComponent, attempts < 3 {
-                attempts += 1
-                first = try await installation.exportLogs()
-                second = try await installation.exportLogs()
-            }
+            let first = try await exporter.export()
+            let second = try await exporter.export()
             defer {
-                try? FileManager.default.removeItem(at: first)
-                try? FileManager.default.removeItem(at: second)
+                try? FileManager.default.removeItem(at: first.deletingLastPathComponent())
+                try? FileManager.default.removeItem(at: second.deletingLastPathComponent())
             }
 
             try #require(first.lastPathComponent == second.lastPathComponent)

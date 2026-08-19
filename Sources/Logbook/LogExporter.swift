@@ -8,11 +8,20 @@ struct LogExporter: Sendable {
     /// The last component of the subsystem, so an exported file is recognisable
     /// as belonging to this app rather than to a reverse-DNS string.
     private let name: String
+    /// Injectable so a test can pin two exports inside one second — the
+    /// name-collision case the per-export directory exists for.
+    private let now: @Sendable () -> Date
 
-    init(subsystem: String, writer: FileWriter, buffer: FileWriteBuffer) {
+    init(
+        subsystem: String,
+        writer: FileWriter,
+        buffer: FileWriteBuffer,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
         self.writer = writer
         self.buffer = buffer
         self.name = subsystem.split(separator: ".").last.map(String.init) ?? subsystem
+        self.now = now
     }
 
     /// `@concurrent` pins the chunked read/write loop off the caller's
@@ -31,7 +40,7 @@ struct LogExporter: Sendable {
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
-        let destination = home.appending(path: "\(name)-logs-\(UTCFormat.stamp.format(Date())).log")
+        let destination = home.appending(path: "\(name)-logs-\(UTCFormat.stamp.format(now())).log")
         FileManager.default.createFile(atPath: destination.path, contents: nil)
 
         let output = try FileHandle(forWritingTo: destination)
