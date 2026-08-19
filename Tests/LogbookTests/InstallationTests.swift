@@ -182,13 +182,15 @@ struct LogExportTests {
         }
     }
 
-    /// One continuous history: an export reads rotated files oldest first.
+    /// One continuous history, oldest first — through a full wraparound, where
+    /// the reused `app-0` is the *newest* file and a name-ordered read would
+    /// put it first.
     @Test func `an export spans rotated files oldest first`() async throws {
         try await withTemporaryDirectory { directory in
             let installation = makeInstallation(
-                files: .init(directory: directory, maxFileSize: 120, maxFileCount: 4, flushThreshold: 1))
+                files: .init(directory: directory, maxFileSize: 120, maxFileCount: 3, flushThreshold: 1))
 
-            for message in ["first", "second", "third"] {
+            for message in ["first", "second", "third", "fourth"] {
                 installation.record(level: .info, message: message, category: "Test", metadata: { [:] })
                 await installation.flush()
                 // Ordering rests on modification dates; space them out.
@@ -203,12 +205,14 @@ struct LogExportTests {
             let exported = try await installation.exportLogs()
             defer { try? FileManager.default.removeItem(at: exported) }
 
+            // The wraparound truncated the oldest line; the rest read in order.
             let contents = try String(contentsOf: exported, encoding: .utf8)
-            let first = try #require(contents.range(of: "first"))
+            #expect(!contents.contains("first"))
             let second = try #require(contents.range(of: "second"))
             let third = try #require(contents.range(of: "third"))
-            #expect(first.lowerBound < second.lowerBound)
+            let fourth = try #require(contents.range(of: "fourth"))
             #expect(second.lowerBound < third.lowerBound)
+            #expect(third.lowerBound < fourth.lowerBound)
         }
     }
 

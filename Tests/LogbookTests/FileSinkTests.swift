@@ -101,22 +101,27 @@ struct FileWriterTests {
     }
 
     /// The invariant behind every sink: I/O failure disables file logging for
-    /// the rest of the process instead of reaching the caller.
-    @Test func `a writer that cannot create its directory goes quiet instead of failing`() async throws {
+    /// the rest of the process instead of reaching the caller. The blocker is
+    /// removed before the second write, so a writer that merely retried —
+    /// rather than staying disabled — would create the directory and fail this.
+    @Test func `a writer that cannot create its directory stays quiet for the rest of the process`() async throws {
         try await withTemporaryDirectory { directory in
             let blocked = directory.appending(path: "Logs", directoryHint: .isDirectory)
             try Data().write(to: blocked)
 
             let writer = FileWriter(directory: blocked, maxFileSize: 1024, maxFileCount: 3)
             await writer.write("[INFO] lost\n")
-            await writer.write("[INFO] also lost\n")
 
+            try FileManager.default.removeItem(at: blocked)
+            await writer.write("[INFO] still lost\n")
+
+            #expect(!FileManager.default.fileExists(atPath: blocked.path))
             #expect(await writer.fileURLs().isEmpty)
         }
     }
 
-    /// Logs are regenerable diagnostics; even when a host app points `directory`
-    /// somewhere backed up, they must not ride into iCloud or local backups.
+    /// Logs are regenerable diagnostics: a directory the writer itself creates
+    /// never rides into iCloud or local backups.
     @Test func `the directory the writer creates is excluded from backups`() async throws {
         try await withTemporaryDirectory { directory in
             let logs = directory.appending(path: "Logs", directoryHint: .isDirectory)
@@ -180,9 +185,29 @@ struct FileWriteBufferTests {
         }
     }
 
-    /// Reaching the threshold writes without any flush call, and a flush with
-    /// nothing newly buffered still waits for that batch to land.
-    @Test func `a full batch reaches disk on its own, and flush waits for it`() async throws {
+    /// No flush is ever called here: the write must come from the threshold
+    /// alone. The poll is bounded because the batch lands on its own schedule.
+    @Test func `a full batch reaches disk without any flush call`() async throws {
+        try await withTemporaryDirectory { directory in
+            let writer = FileWriter(directory: directory, maxFileSize: 10_000, maxFileCount: 3)
+            let buffer = FileWriteBuffer(writer: writer, flushThreshold: 2)
+
+            buffer.append("one\n")
+            buffer.append("two\n")
+
+            for _ in 0..<100 where await writer.fileURLs().isEmpty {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+
+            let files = await writer.fileURLs()
+            let contents = try String(contentsOf: #require(files.first), encoding: .utf8)
+            #expect(contents == "one\ntwo\n")
+        }
+    }
+
+    /// A flush with nothing newly buffered still waits for the batch the
+    /// threshold already sent on its way.
+    @Test func `flush waits for a batch already in flight`() async throws {
         try await withTemporaryDirectory { directory in
             let writer = FileWriter(directory: directory, maxFileSize: 10_000, maxFileCount: 3)
             let buffer = FileWriteBuffer(writer: writer, flushThreshold: 2)
