@@ -63,10 +63,14 @@ actor FileWriter {
     private struct Candidate {
         let index: Int
         let url: URL
-        let modified: Date
+        /// `nil` when the date cannot be read. A file that cannot be dated is
+        /// never reaped and never resumed onto.
+        let modified: Date?
     }
 
-    private static func fileName(index: Int) -> String { "app-\(index).log" }
+    private static let prefix = "app-"
+
+    private static func fileName(index: Int) -> String { "\(prefix)\(index).log" }
 
     private func fileURL(index: Int) -> URL {
         directory.appending(path: Self.fileName(index: index))
@@ -89,43 +93,58 @@ actor FileWriter {
         return files
             .compactMap { url -> Candidate? in
                 let name = url.deletingPathExtension().lastPathComponent
-                guard name.hasPrefix("app-"),
-                      let index = Int(name.dropFirst(4)), index >= 0,
+                guard name.hasPrefix(Self.prefix),
+                      let index = Int(name.dropFirst(Self.prefix.count)), index >= 0,
                       url.lastPathComponent == Self.fileName(index: index)
                 else { return nil }
-                return Candidate(index: index, url: url, modified: modificationDate(of: url))
+
+                let modified = try? url
+                    .resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate
+                return Candidate(index: index, url: url, modified: modified)
             }
             .sorted {
-                $0.modified != $1.modified ? $0.modified < $1.modified : $0.index < $1.index
+                let first = $0.modified ?? .distantPast
+                let second = $1.modified ?? .distantPast
+                return first != second ? first < second : $0.index < $1.index
             }
-    }
-
-    private func modificationDate(of url: URL) -> Date {
-        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-            ?? .distantPast
     }
 
     /// Once per process, before the first read or write of the directory:
-    /// adopt the file the previous run stopped in, and reap files a larger
-    /// rotation stranded beyond `maxFileCount` — but only once every in-range
-    /// file has outlived them. Shrinking the rotation therefore never destroys
-    /// the newest history, and disk use still converges to the new bound
-    /// within one full cycle.
+    /// reap what the rotation has already outlived, then adopt the file the
+    /// previous run stopped in.
     private func prepareIfNeeded() {
         guard !prepared else { return }
         prepared = true
 
-        let files = ownFiles()
+        let files = reapLapped()
         let inRange = files.filter { (0..<maxFileCount).contains($0.index) }
+        fileIndex = inRange.last?.index ?? 0
+    }
 
-        if let oldestInRange = inRange.first?.modified {
-            for stranded in files
-            where stranded.index >= maxFileCount && stranded.modified < oldestInRange {
-                try? FileManager.default.removeItem(at: stranded.url)
+    /// Deletes files a larger rotation stranded beyond `maxFileCount`, but
+    /// only those every in-range file has verifiably outlived: a stranded file
+    /// holding the newest history survives until the cycle laps it, and an
+    /// unreadable date never justifies a deletion. Returns the survivors.
+    @discardableResult
+    private func reapLapped() -> [Candidate] {
+        let files = ownFiles()
+        let oldestInRange = files
+            .filter { (0..<maxFileCount).contains($0.index) }
+            .compactMap(\.modified)
+            .min()
+        guard let oldestInRange else { return files }
+
+        var kept: [Candidate] = []
+        for candidate in files {
+            if candidate.index >= maxFileCount,
+               let modified = candidate.modified, modified < oldestInRange {
+                try? FileManager.default.removeItem(at: candidate.url)
+            } else {
+                kept.append(candidate)
             }
         }
-
-        fileIndex = inRange.last?.index ?? 0
+        return kept
     }
 
     /// Re-run before every open and rotation, not once: the system may purge a
@@ -188,5 +207,10 @@ actor FileWriter {
         }
 
         openCurrentFile()
+
+        // The cycle just moved on, so a stranded file it has now outlived is
+        // reaped here too — a long-resident process must not carry one in
+        // every export until its next launch.
+        reapLapped()
     }
 }

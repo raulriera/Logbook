@@ -24,6 +24,13 @@ func setModificationDate(_ date: Date, for url: URL) throws {
     try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
 }
 
+/// Writes `contents` and stamps the age in one step, so an aged fixture can
+/// never forget the stamp that keeps modification-date ordering deterministic.
+func seedFile(at url: URL, contents: String, modified: Date) throws {
+    try Data(contents.utf8).write(to: url)
+    try setModificationDate(modified, for: url)
+}
+
 /// Reads the backup-exclusion mark off disk. The URL is rebuilt from its path
 /// on purpose: resource values are cached per URL instance, and a reused
 /// instance can answer stale.

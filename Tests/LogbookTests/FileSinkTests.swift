@@ -118,9 +118,10 @@ struct FileWriterTests {
     @Test func `a file beyond the rotation survives while it holds the newest history`() async throws {
         try await withTemporaryDirectory { directory in
             for index in 0..<5 {
-                let url = directory.appending(path: "app-\(index).log")
-                try Data("old-\(index)\n".utf8).write(to: url)
-                try setModificationDate(Date(timeIntervalSince1970: 1_000 + TimeInterval(index)), for: url)
+                try seedFile(
+                    at: directory.appending(path: "app-\(index).log"),
+                    contents: "old-\(index)\n",
+                    modified: Date(timeIntervalSince1970: 1_000 + TimeInterval(index)))
             }
 
             let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
@@ -137,18 +138,41 @@ struct FileWriterTests {
     @Test func `a file the rotation has lapped is reaped before listing`() async throws {
         try await withTemporaryDirectory { directory in
             for index in 0..<3 {
-                let url = directory.appending(path: "app-\(index).log")
-                try Data("current-\(index)\n".utf8).write(to: url)
-                try setModificationDate(Date(timeIntervalSince1970: 2_000 + TimeInterval(index)), for: url)
+                try seedFile(
+                    at: directory.appending(path: "app-\(index).log"),
+                    contents: "current-\(index)\n",
+                    modified: Date(timeIntervalSince1970: 2_000 + TimeInterval(index)))
             }
             let lapped = directory.appending(path: "app-4.log")
-            try Data("lapped\n".utf8).write(to: lapped)
-            try setModificationDate(Date(timeIntervalSince1970: 1_000), for: lapped)
+            try seedFile(at: lapped, contents: "lapped\n", modified: Date(timeIntervalSince1970: 1_000))
 
             let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
 
             #expect(await writer.fileURLs().map(\.lastPathComponent) == ["app-0.log", "app-1.log", "app-2.log"])
             #expect(!FileManager.default.fileExists(atPath: lapped.path))
+        }
+    }
+
+    /// A long-resident process reaps a lapped stranded file at rotation, not
+    /// only at the next launch — exports must stop carrying it once the cycle
+    /// has outlived it.
+    @Test func `rotation reaps a stranded file the cycle has lapped`() async throws {
+        try await withTemporaryDirectory { directory in
+            for index in 0..<3 {
+                try seedFile(
+                    at: directory.appending(path: "app-\(index).log"),
+                    contents: "x\n",
+                    modified: Date(timeIntervalSince1970: 500 + TimeInterval(index)))
+            }
+            let stranded = directory.appending(path: "app-4.log")
+            try seedFile(at: stranded, contents: "stranded\n", modified: Date(timeIntervalSince1970: 1_000))
+
+            let writer = FileWriter(directory: directory, maxFileSize: 30, maxFileCount: 3)
+            // Newer than every in-range file, so the first write spares it;
+            // three rotations later the whole cycle has outlived it.
+            for _ in 0..<3 { await writer.write(String(repeating: "y", count: 29) + "\n") }
+
+            #expect(!FileManager.default.fileExists(atPath: stranded.path))
         }
     }
 
@@ -199,9 +223,10 @@ struct FileWriterTests {
         try await withTemporaryDirectory { directory in
             let tie = Date(timeIntervalSince1970: 3_000)
             for index in 0..<2 {
-                let url = directory.appending(path: "app-\(index).log")
-                try Data("tied-\(index)\n".utf8).write(to: url)
-                try setModificationDate(tie, for: url)
+                try seedFile(
+                    at: directory.appending(path: "app-\(index).log"),
+                    contents: "tied-\(index)\n",
+                    modified: tie)
             }
 
             let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
@@ -324,8 +349,15 @@ struct FileWriteBufferTests {
                 try await Task.sleep(for: .milliseconds(10))
             }
 
-            let files = await writer.fileURLs()
-            let contents = try String(contentsOf: #require(files.first), encoding: .utf8)
+            // Captured before the flush: the poll's observation is the
+            // evidence, and flushing first would write the lines itself and
+            // mask a dead threshold.
+            let landed = await writer.fileURLs().first
+            // Pins the in-flight batch before any assertion can throw; an
+            // unawaited task would recreate the directory after teardown.
+            await buffer.flush()
+
+            let contents = try String(contentsOf: #require(landed), encoding: .utf8)
             #expect(contents == "one\ntwo\n")
         }
     }
