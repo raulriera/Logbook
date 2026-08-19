@@ -25,7 +25,14 @@ actor FileWriter {
     func write(_ text: String) {
         guard !disabled, let data = text.data(using: .utf8) else { return }
 
-        if handle == nil { openCurrentFile() }
+        // The handle is only nil before the first write of the process; a
+        // rotation reopens on its own. So this is where a relaunch resumes on
+        // the file the previous run stopped in, rather than putting new lines
+        // under the oldest history and truncating the newest at first rotation.
+        if handle == nil {
+            fileIndex = resumeIndex()
+            openCurrentFile()
+        }
         if bytesWritten + data.count > maxFileSize { rotate() }
 
         do {
@@ -55,6 +62,17 @@ actor FileWriter {
 
     private func fileURL(index: Int) -> URL {
         directory.appending(path: "app-\(index).log")
+    }
+
+    /// The index of the most recently modified `app-N.log`, or the first index
+    /// where none exists or the newest does not fit the current rotation.
+    private func resumeIndex() -> Int {
+        let newest = fileURLs().last { $0.lastPathComponent.hasPrefix("app-") }
+        guard let newest,
+              let index = Int(newest.deletingPathExtension().lastPathComponent.dropFirst(4)),
+              index < maxFileCount
+        else { return 0 }
+        return index
     }
 
     private func modificationDate(of url: URL) -> Date {

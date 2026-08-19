@@ -38,6 +38,46 @@ struct FileWriterTests {
         }
     }
 
+    /// A relaunch resumes on the newest file. Restarting at the first instead
+    /// would put new lines under the oldest history — and let the first
+    /// rotation truncate the newest.
+    @Test func `a new writer resumes on the most recently written file`() async throws {
+        try await withTemporaryDirectory { directory in
+            let first = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
+            // 30 bytes into app-0; the 80-byte line then rotates onto app-1
+            // (30 + 80 > 100) and leaves it room for one more short line.
+            await first.write(String(repeating: "a", count: 29) + "\n")
+            // Resumption rests on modification dates; space the two files out.
+            try await Task.sleep(for: .milliseconds(20))
+            await first.write(String(repeating: "b", count: 79) + "\n")
+
+            let second = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
+            await second.write("[INFO] two\n")
+
+            let zero = try String(contentsOf: directory.appending(path: "app-0.log"), encoding: .utf8)
+            let one = try String(contentsOf: directory.appending(path: "app-1.log"), encoding: .utf8)
+            #expect(zero == String(repeating: "a", count: 29) + "\n")
+            #expect(one == String(repeating: "b", count: 79) + "\n[INFO] two\n")
+        }
+    }
+
+    /// Resuming a file that is already at the limit must roll before writing,
+    /// exactly as if the process had never restarted.
+    @Test func `a resumed file that is already full rotates before the next line`() async throws {
+        try await withTemporaryDirectory { directory in
+            let first = FileWriter(directory: directory, maxFileSize: 40, maxFileCount: 3)
+            await first.write(String(repeating: "x", count: 39) + "\n")
+
+            let second = FileWriter(directory: directory, maxFileSize: 40, maxFileCount: 3)
+            await second.write("[INFO] next\n")
+
+            let zero = try String(contentsOf: directory.appending(path: "app-0.log"), encoding: .utf8)
+            let one = try String(contentsOf: directory.appending(path: "app-1.log"), encoding: .utf8)
+            #expect(zero == String(repeating: "x", count: 39) + "\n")
+            #expect(one == "[INFO] next\n")
+        }
+    }
+
     /// The invariant behind every sink: I/O failure disables file logging for
     /// the rest of the process instead of reaching the caller.
     @Test func `a writer that cannot create its directory goes quiet instead of failing`() async throws {
