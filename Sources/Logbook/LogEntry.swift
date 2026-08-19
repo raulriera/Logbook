@@ -40,7 +40,7 @@ public struct LogEntry: Sendable {
     /// of its own and so carries everything — including the call site the
     /// unified log cannot record for us.
     public func formatted() -> String {
-        "[\(level.rawValue.uppercased())] \(Self.timestampStyle.format(timestamp))Z \(category) \(consoleText) (\(file):\(line))"
+        "[\(level.rawValue.uppercased())] \(UTCFormat.line.format(timestamp))Z \(category) \(consoleText) (\(file):\(line))"
     }
 
     /// The message and its metadata, sorted by key so repeated runs of the same
@@ -58,16 +58,4 @@ public struct LogEntry: Sendable {
         return "\(message) \(pairs)"
     }
 
-    /// UTC, so an exported log reads the same wherever it is opened. Fixed
-    /// locale and calendar keep the digits stable under any device setting.
-    private static let timestampStyle = Date.VerbatimFormatStyle(
-        format: """
-            \(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \
-            \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\
-            \(minute: .twoDigits):\(second: .twoDigits)
-            """,
-        locale: Locale(identifier: "en_US_POSIX"),
-        timeZone: .gmt,
-        calendar: Calendar(identifier: .gregorian)
-    )
 }

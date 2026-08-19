@@ -28,7 +28,7 @@ struct LogExporter: Sendable {
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
-        let destination = home.appending(path: "\(name)-logs-\(Self.stamp.format(Date())).log")
+        let destination = home.appending(path: "\(name)-logs-\(UTCFormat.stamp.format(Date())).log")
         FileManager.default.createFile(atPath: destination.path, contents: nil)
 
         let output = try FileHandle(forWritingTo: destination)
@@ -47,17 +47,6 @@ struct LogExporter: Sendable {
     }
 
     private static let chunkSize = 64 * 1024
-
-    private static let stamp = Date.VerbatimFormatStyle(
-        format: """
-            \(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits)-\
-            \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))\
-            \(minute: .twoDigits)\(second: .twoDigits)
-            """,
-        locale: Locale(identifier: "en_US_POSIX"),
-        timeZone: .gmt,
-        calendar: Calendar(identifier: .gregorian)
-    )
 }
 
 /// Why a log export could not be produced.
