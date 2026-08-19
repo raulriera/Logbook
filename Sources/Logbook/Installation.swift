@@ -21,7 +21,7 @@ final class Installation: Sendable {
 
         if let files = configuration.files {
             let writer = FileWriter(
-                directory: files.directory ?? Self.defaultDirectory,
+                directory: files.resolvedDirectory,
                 maxFileSize: files.maxFileSize,
                 maxFileCount: files.maxFileCount
             )

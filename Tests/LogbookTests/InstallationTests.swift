@@ -193,14 +193,20 @@ struct LogExportTests {
             for message in ["first", "second", "third", "fourth"] {
                 installation.record(level: .info, message: message, category: "Test", metadata: { [:] })
                 await installation.flush()
-                // Ordering rests on modification dates; space them out.
-                try await Task.sleep(for: .milliseconds(20))
             }
 
             let written = try FileManager.default
                 .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
                 .filter { $0.pathExtension == "log" }
             #expect(written.count == 3)
+
+            // Ordering rests on modification dates; state them rather than
+            // sleep for the clock to move between writes.
+            for url in written {
+                let body = try String(contentsOf: url, encoding: .utf8)
+                let age: TimeInterval = body.contains("second") ? 1 : body.contains("third") ? 2 : 3
+                try setModificationDate(Date(timeIntervalSince1970: 6_000 + age), for: url)
+            }
 
             let exported = try await installation.exportLogs()
             defer { try? FileManager.default.removeItem(at: exported) }
@@ -235,6 +241,15 @@ struct LogExportTests {
             #expect(FileManager.default.fileExists(atPath: first.path))
             #expect(FileManager.default.fileExists(atPath: second.path))
         }
+    }
+
+    /// The seam `Installation` wires the writer through: `nil` falls back to
+    /// the default, anything else is taken as given.
+    @Test func `file options resolve a nil directory to the default`() {
+        let custom = URL(fileURLWithPath: "/tmp/custom", isDirectory: true)
+
+        #expect(Logbook.Configuration.FileOptions().resolvedDirectory == Installation.defaultDirectory)
+        #expect(Logbook.Configuration.FileOptions(directory: custom).resolvedDirectory == custom)
     }
 
     /// Only the URL is asserted: the write path is covered by the temporary-

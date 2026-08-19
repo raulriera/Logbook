@@ -43,23 +43,20 @@ struct BootstrapTests {
     /// A batch only reaches disk once it fills, so without this a launch that
     /// says little writes nothing — and loses it when the process ends.
     @Test func `flushing writes lines that have not filled a batch`() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        try await withTemporaryDirectory { directory in
+            Logbook.bootstrap(
+                subsystem: "com.example.Bootstrap",
+                configuration: Logbook.Configuration(
+                    minimumLevel: .trace,
+                    files: .init(directory: directory, flushThreshold: 100))
+            )
+            Log("Quiet").error("one lonely line")
 
-        Logbook.bootstrap(
-            subsystem: "com.example.Bootstrap",
-            configuration: Logbook.Configuration(
-                minimumLevel: .trace,
-                files: .init(directory: directory, flushThreshold: 100))
-        )
-        Log("Quiet").error("one lonely line")
+            await Logbook.flush()
 
-        await Logbook.flush()
-
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-        let contents = try String(contentsOf: #require(files.first), encoding: .utf8)
-        #expect(contents.contains("one lonely line"))
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            let contents = try String(contentsOf: #require(files.first), encoding: .utf8)
+            #expect(contents.contains("one lonely line"))
+        }
     }
 }

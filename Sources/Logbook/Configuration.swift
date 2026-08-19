@@ -26,6 +26,8 @@ extension Logbook {
             public var maxFileSize: Int
             /// How many files the rotation cycles through. The oldest is
             /// emptied and written over, which is what bounds total log size.
+            /// Shrinking the count strands files beyond it only until the new
+            /// cycle outlives them; the newest history is never discarded.
             public var maxFileCount: Int
             /// Lines held in memory before a batch is written.
             public var flushThreshold: Int
@@ -66,5 +68,14 @@ extension Logbook {
             self.files = files
             self.middleware = middleware
         }
+    }
+}
+
+extension Logbook.Configuration.FileOptions {
+    /// The directory the writer uses — the one seam `Installation` wires
+    /// through, so the `Caches/Logs` fallback stays testable without touching
+    /// the real location.
+    var resolvedDirectory: URL {
+        directory ?? Installation.defaultDirectory
     }
 }
