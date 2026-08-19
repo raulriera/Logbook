@@ -47,6 +47,21 @@ struct FileWriterTests {
         }
     }
 
+    /// Logs are regenerable diagnostics; even when a host app points `directory`
+    /// somewhere backed up, they must not ride into iCloud or local backups.
+    @Test func `the directory the writer creates is excluded from backups`() async throws {
+        try await withTemporaryDirectory { directory in
+            let logs = directory.appendingPathComponent("Logs", isDirectory: true)
+            let writer = FileWriter(directory: logs, maxFileSize: 1024, maxFileCount: 3)
+            await writer.write("[INFO] line\n")
+
+            let excluded = try URL(fileURLWithPath: logs.path)
+                .resourceValues(forKeys: [.isExcludedFromBackupKey])
+                .isExcludedFromBackup
+            #expect(excluded == true)
+        }
+    }
+
     @Test func `a rotated file is truncated rather than appended to`() async throws {
         try await withTemporaryDirectory { directory in
             let writer = FileWriter(directory: directory, maxFileSize: 30, maxFileCount: 2)

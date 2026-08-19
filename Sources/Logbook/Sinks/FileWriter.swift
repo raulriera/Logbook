@@ -67,6 +67,14 @@ actor FileWriter {
         let manager = FileManager.default
 
         try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        // Logs are regenerable diagnostics: even when the host points `directory`
+        // somewhere backed up, they must not ride into iCloud or local backups.
+        var excluded = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? excluded.setResourceValues(values)
+
         if !manager.fileExists(atPath: url.path) {
             manager.createFile(atPath: url.path, contents: nil)
         }
