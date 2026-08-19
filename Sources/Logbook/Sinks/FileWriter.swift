@@ -17,13 +17,16 @@ actor FileWriter {
     private var disabled = false
 
     init(directory: URL, maxFileSize: Int, maxFileCount: Int) {
+        precondition(maxFileSize > 0, "A log file needs room for at least one byte")
+        precondition(maxFileCount > 0, "Rotation needs at least one file")
         self.directory = directory
         self.maxFileSize = maxFileSize
         self.maxFileCount = maxFileCount
     }
 
     func write(_ text: String) {
-        guard !disabled, let data = text.data(using: .utf8) else { return }
+        guard !disabled else { return }
+        let data = Data(text.utf8)
 
         // The handle is only nil before the first write of the process; a
         // rotation reopens on its own. So this is where a relaunch resumes on
@@ -33,10 +36,13 @@ actor FileWriter {
             fileIndex = resumeIndex()
             openCurrentFile()
         }
+        guard !disabled else { return }
+
         if bytesWritten + data.count > maxFileSize { rotate() }
+        guard let handle else { return }
 
         do {
-            try handle?.write(contentsOf: data)
+            try handle.write(contentsOf: data)
             bytesWritten += data.count
         } catch {
             disabled = true

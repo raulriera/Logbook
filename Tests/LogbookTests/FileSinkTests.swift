@@ -4,6 +4,28 @@ import Testing
 
 @Suite("File writer", .tags(.sinks))
 struct FileWriterTests {
+    /// Bad configuration fails at bootstrap, like the other sinks — never as a
+    /// modulo trap in the middle of a log write.
+    @Test func `a zero file count is rejected when the writer is built`() async {
+        await #expect(processExitsWith: .failure) {
+            _ = FileWriter(
+                directory: FileManager.default.temporaryDirectory,
+                maxFileSize: 100,
+                maxFileCount: 0
+            )
+        }
+    }
+
+    @Test func `a zero file size is rejected when the writer is built`() async {
+        await #expect(processExitsWith: .failure) {
+            _ = FileWriter(
+                directory: FileManager.default.temporaryDirectory,
+                maxFileSize: 0,
+                maxFileCount: 3
+            )
+        }
+    }
+
     @Test func `writes land in a single file while they fit`() async throws {
         try await withTemporaryDirectory { directory in
             let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
