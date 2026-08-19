@@ -4,6 +4,8 @@ import Testing
 
 @Suite("File writer", .tags(.sinks))
 struct FileWriterTests {
+    // Exit tests are unavailable on iOS; the preconditions they exercise are not.
+    #if os(macOS)
     /// Bad configuration fails at bootstrap, like the other sinks — never as a
     /// modulo trap in the middle of a log write.
     @Test func `a zero file count is rejected when the writer is built`() async {
@@ -25,6 +27,7 @@ struct FileWriterTests {
             )
         }
     }
+    #endif
 
     @Test func `writes land in a single file while they fit`() async throws {
         try await withTemporaryDirectory { directory in

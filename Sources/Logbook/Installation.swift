@@ -84,8 +84,6 @@ final class Installation: Sendable {
         return try await exporter.export()
     }
 
-    // MARK: - Private
-
     /// `Logs` under the user caches, so the system may reclaim log space when
     /// storage runs short. Falls back to the temporary directory in the rare
     /// containers that expose no caches at all.
@@ -94,6 +92,8 @@ final class Installation: Sendable {
             ?? FileManager.default.temporaryDirectory
         return caches.appending(path: "Logs", directoryHint: .isDirectory)
     }
+
+    // MARK: - Private
 
     private func logger(for category: String) -> os.Logger {
         loggers.withLock { loggers in
