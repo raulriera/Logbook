@@ -47,6 +47,21 @@ struct FileWriterTests {
         }
     }
 
+    /// The invariant behind every sink: I/O failure disables file logging for
+    /// the rest of the process instead of reaching the caller.
+    @Test func `a writer that cannot create its directory goes quiet instead of failing`() async throws {
+        try await withTemporaryDirectory { directory in
+            let blocked = directory.appendingPathComponent("Logs", isDirectory: true)
+            try Data().write(to: blocked)
+
+            let writer = FileWriter(directory: blocked, maxFileSize: 1024, maxFileCount: 3)
+            await writer.write("[INFO] lost\n")
+            await writer.write("[INFO] also lost\n")
+
+            #expect(await writer.fileURLs().isEmpty)
+        }
+    }
+
     /// Logs are regenerable diagnostics; even when a host app points `directory`
     /// somewhere backed up, they must not ride into iCloud or local backups.
     @Test func `the directory the writer creates is excluded from backups`() async throws {
@@ -89,6 +104,24 @@ struct FileWriteBufferTests {
             #expect(await writer.fileURLs().isEmpty)
 
             await buffer.flush()
+            let files = await writer.fileURLs()
+            let contents = try String(contentsOf: #require(files.first), encoding: .utf8)
+            #expect(contents == "one\ntwo\n")
+        }
+    }
+
+    /// Reaching the threshold writes without any flush call, and a flush with
+    /// nothing newly buffered still waits for that batch to land.
+    @Test func `a full batch reaches disk on its own, and flush waits for it`() async throws {
+        try await withTemporaryDirectory { directory in
+            let writer = FileWriter(directory: directory, maxFileSize: 10_000, maxFileCount: 3)
+            let buffer = FileWriteBuffer(writer: writer, flushThreshold: 2)
+
+            buffer.append("one\n")
+            buffer.append("two\n")
+
+            await buffer.flush()
+
             let files = await writer.fileURLs()
             let contents = try String(contentsOf: #require(files.first), encoding: .utf8)
             #expect(contents == "one\ntwo\n")

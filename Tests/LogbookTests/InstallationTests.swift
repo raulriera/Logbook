@@ -33,6 +33,27 @@ private struct DropEverything: LogMiddleware {
     func process(_ entry: inout LogEntry) -> Bool { false }
 }
 
+/// Appends its name to the entry's trail, so the order steps ran in is
+/// readable off the recorded entry.
+private struct Mark: LogMiddleware {
+    let name: String
+    func process(_ entry: inout LogEntry) -> Bool {
+        entry.metadata["trail", default: ""] += name
+        return true
+    }
+}
+
+/// Counts how many times it runs, observable even when the entry is dropped.
+private final class ProcessCounter: LogMiddleware {
+    private let hits = Mutex(0)
+    var count: Int { hits.withLock { $0 } }
+
+    func process(_ entry: inout LogEntry) -> Bool {
+        hits.withLock { $0 += 1 }
+        return true
+    }
+}
+
 @Suite("Log pipeline", .tags(.core))
 struct InstallationTests {
     @Test func `an entry below the minimum level is not recorded`() {
@@ -63,6 +84,24 @@ struct InstallationTests {
         installation.record(level: .error, message: "gone", category: "Test", metadata: { [:] })
 
         #expect(installation.recentEntries().isEmpty)
+    }
+
+    @Test func `middleware runs in array order, each seeing the previous rewrite`() {
+        let installation = makeInstallation(middleware: [Mark(name: "a"), Mark(name: "b")])
+
+        installation.record(level: .info, message: "walk", category: "Test", metadata: { [:] })
+
+        #expect(installation.recentEntries()[0].contains("trail=ab"))
+    }
+
+    @Test func `a middleware returning false stops the steps after it`() {
+        let after = ProcessCounter()
+        let installation = makeInstallation(middleware: [DropEverything(), after])
+
+        installation.record(level: .error, message: "gone", category: "Test", metadata: { [:] })
+
+        #expect(installation.recentEntries().isEmpty)
+        #expect(after.count == 0)
     }
 
     @Test func `a middleware rewrite reaches the recorded entry`() {
@@ -153,6 +192,36 @@ struct LogExportTests {
 
         await #expect(throws: LogExportError.noLogsAvailable) {
             try await installation.exportLogs()
+        }
+    }
+
+    /// One continuous history: an export reads rotated files oldest first.
+    @Test func `an export spans rotated files oldest first`() async throws {
+        try await withTemporaryDirectory { directory in
+            let installation = makeInstallation(
+                files: .init(directory: directory, maxFileSize: 120, maxFileCount: 4, flushThreshold: 1))
+
+            for message in ["first", "second", "third"] {
+                installation.record(level: .info, message: message, category: "Test", metadata: { [:] })
+                await installation.flush()
+                // Ordering rests on modification dates; space them out.
+                try await Task.sleep(for: .milliseconds(20))
+            }
+
+            let written = try FileManager.default
+                .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "log" }
+            #expect(written.count == 3)
+
+            let exported = try await installation.exportLogs()
+            defer { try? FileManager.default.removeItem(at: exported) }
+
+            let contents = try String(contentsOf: exported, encoding: .utf8)
+            let first = try #require(contents.range(of: "first"))
+            let second = try #require(contents.range(of: "second"))
+            let third = try #require(contents.range(of: "third"))
+            #expect(first.lowerBound < second.lowerBound)
+            #expect(second.lowerBound < third.lowerBound)
         }
     }
 
