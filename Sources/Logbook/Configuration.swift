@@ -18,7 +18,9 @@ extension Logbook {
         /// Where log files live and how much of them is kept.
         public struct FileOptions: Sendable {
             /// `nil` places them under `Caches/Logs`, which the system may
-            /// reclaim when space runs short.
+            /// reclaim when space runs short. A directory the writer creates
+            /// itself is excluded from backups; one that already exists is
+            /// left as found.
             public var directory: URL?
             /// Bytes a file may reach before the writer rolls onto the next.
             public var maxFileSize: Int

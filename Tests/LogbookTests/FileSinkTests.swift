@@ -68,6 +68,23 @@ struct FileWriterTests {
         }
     }
 
+    /// A directory the host already owns is left as found: stamping it would
+    /// silently pull the host's co-located files out of backups too.
+    @Test func `a pre-existing directory is not marked excluded from backups`() async throws {
+        try await withTemporaryDirectory { directory in
+            let owned = directory.appendingPathComponent("Logs", isDirectory: true)
+            try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
+
+            let writer = FileWriter(directory: owned, maxFileSize: 1024, maxFileCount: 3)
+            await writer.write("[INFO] line\n")
+
+            let excluded = try URL(fileURLWithPath: owned.path)
+                .resourceValues(forKeys: [.isExcludedFromBackupKey])
+                .isExcludedFromBackup
+            #expect(excluded != true)
+        }
+    }
+
     @Test func `a rotated file is truncated rather than appended to`() async throws {
         try await withTemporaryDirectory { directory in
             let writer = FileWriter(directory: directory, maxFileSize: 30, maxFileCount: 2)
