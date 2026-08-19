@@ -16,7 +16,7 @@ actor FileWriter {
     private var bytesWritten = 0
     private var disabled = false
 
-    init(directory: URL, maxFileSize: Int = 500_000, maxFileCount: Int = 3) {
+    init(directory: URL, maxFileSize: Int, maxFileCount: Int) {
         self.directory = directory
         self.maxFileSize = maxFileSize
         self.maxFileCount = maxFileCount

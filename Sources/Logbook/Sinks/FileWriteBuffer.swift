@@ -11,7 +11,7 @@ final class FileWriteBuffer: Sendable {
     /// they were appended rather than in whichever order tasks get scheduled.
     private let pending = Mutex<Task<Void, Never>?>(nil)
 
-    init(writer: FileWriter, flushThreshold: Int = 10) {
+    init(writer: FileWriter, flushThreshold: Int) {
         precondition(flushThreshold > 0, "A batch needs at least one line")
         self.writer = writer
         self.flushThreshold = flushThreshold
