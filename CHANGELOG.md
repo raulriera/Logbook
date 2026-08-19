@@ -1,9 +1,6 @@
 # Changelog
 
-Tags are semver; anything that breaks a public signature or observable
-behavior is a major.
-
-## Unreleased — must ship as 2.0.0
+## 1.1.0
 
 - Every file-sink and `recentEntries` line now ends with the call site, as
   `(file:line)`. Anything parsing the 1.0.0 line shape must be updated.
