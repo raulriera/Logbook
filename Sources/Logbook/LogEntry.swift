@@ -9,7 +9,9 @@ public struct LogEntry: Sendable {
     public var message: String
     public var metadata: [String: String]
     public let category: String
-    /// Where the call was made, captured at the call site.
+    /// The call site, captured where the `Log` method was invoked. `file` and
+    /// `line` end each file-sink line; `function` is carried for middleware
+    /// that filters or annotates by origin.
     public let file: String
     public let function: String
     public let line: UInt
@@ -35,9 +37,10 @@ public struct LogEntry: Sendable {
     }
 
     /// Renders the entry as one line for the file sink, which has no metadata
-    /// of its own and so carries everything.
+    /// of its own and so carries everything — including the call site the
+    /// unified log cannot record for us.
     public func formatted() -> String {
-        "[\(level.rawValue.uppercased())] \(Self.timestampStyle.format(timestamp))Z \(category) \(consoleText)"
+        "[\(level.rawValue.uppercased())] \(Self.timestampStyle.format(timestamp))Z \(category) \(consoleText) (\(file):\(line))"
     }
 
     /// The message and its metadata, sorted by key so repeated runs of the same

@@ -19,7 +19,7 @@ struct LogEntryTests {
             line: 42
         )
 
-        #expect(entry.formatted() == "[INFO] 2026-03-26 10:32:15Z Rates Rate fetched")
+        #expect(entry.formatted() == "[INFO] 2026-03-26 10:32:15Z Rates Rate fetched (Rates.swift:42)")
     }
 
     @Test func `metadata renders as key=value pairs sorted by key`() {
@@ -34,7 +34,7 @@ struct LogEntryTests {
             line: 42
         )
 
-        #expect(entry.formatted() == "[WARNING] 2026-03-26 10:32:15Z Rates Stale rate age=120 currency=USD")
+        #expect(entry.formatted() == "[WARNING] 2026-03-26 10:32:15Z Rates Stale rate age=120 currency=USD (Rates.swift:42)")
     }
 
     @Test func `console text drops what the unified log records for itself`() {
