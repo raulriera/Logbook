@@ -20,7 +20,8 @@ extension Logbook {
             /// `nil` places them under `Caches/Logs`, which the system may
             /// reclaim when space runs short. A directory the writer creates
             /// itself is excluded from backups; one that already exists is
-            /// left as found.
+            /// left as found — but files named `app-N.log` inside it belong
+            /// to the writer's rotation, which empties and reaps them.
             public var directory: URL?
             /// Bytes a file may reach before the writer rolls onto the next.
             public var maxFileSize: Int

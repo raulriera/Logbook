@@ -14,6 +14,10 @@ public enum Logbook {
     ///
     /// `subsystem` defaults to the main bundle identifier. Pass the host app's
     /// identifier from an app extension, where that default names the extension.
+    ///
+    /// Replacing an installation whose file batches are still landing can
+    /// interleave writes into the file the new one resumes on; `await
+    /// Logbook.flush()` first narrows that window.
     public static func bootstrap(
         subsystem: String? = nil,
         configuration: Configuration = Configuration()
