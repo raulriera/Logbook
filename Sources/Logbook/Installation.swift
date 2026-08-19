@@ -89,7 +89,7 @@ final class Installation: Sendable {
     private static var defaultDirectory: URL {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        return caches.appendingPathComponent("Logs", isDirectory: true)
+        return caches.appending(path: "Logs", directoryHint: .isDirectory)
     }
 
     private func logger(for category: String) -> os.Logger {

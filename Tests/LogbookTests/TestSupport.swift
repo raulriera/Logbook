@@ -12,7 +12,7 @@ extension Tag {
 /// writes outside its own temporary corner.
 func withTemporaryDirectory(_ body: (URL) async throws -> Void) async throws {
     let directory = FileManager.default.temporaryDirectory
-        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        .appending(path: UUID().uuidString, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     try await body(directory)

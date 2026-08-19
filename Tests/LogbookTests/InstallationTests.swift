@@ -136,7 +136,7 @@ struct InstallationTests {
 
     @Test func `turning file logging off leaves no directory behind`() async throws {
         try await withTemporaryDirectory { directory in
-            let unused = directory.appendingPathComponent("Logs", isDirectory: true)
+            let unused = directory.appending(path: "Logs", directoryHint: .isDirectory)
             let installation = makeInstallation(files: nil)
 
             installation.record(level: .info, message: "memory only", category: "Test", metadata: { [:] })

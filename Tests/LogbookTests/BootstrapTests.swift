@@ -44,7 +44,7 @@ struct BootstrapTests {
     /// says little writes nothing — and loses it when the process ends.
     @Test func `flushing writes lines that have not filled a batch`() async throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 

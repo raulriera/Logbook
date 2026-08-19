@@ -54,7 +54,7 @@ actor FileWriter {
     // MARK: - Private
 
     private func fileURL(index: Int) -> URL {
-        directory.appendingPathComponent("app-\(index).log")
+        directory.appending(path: "app-\(index).log")
     }
 
     private func modificationDate(of url: URL) -> Date {

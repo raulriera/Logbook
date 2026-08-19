@@ -42,7 +42,7 @@ struct FileWriterTests {
     /// the rest of the process instead of reaching the caller.
     @Test func `a writer that cannot create its directory goes quiet instead of failing`() async throws {
         try await withTemporaryDirectory { directory in
-            let blocked = directory.appendingPathComponent("Logs", isDirectory: true)
+            let blocked = directory.appending(path: "Logs", directoryHint: .isDirectory)
             try Data().write(to: blocked)
 
             let writer = FileWriter(directory: blocked, maxFileSize: 1024, maxFileCount: 3)
@@ -57,7 +57,7 @@ struct FileWriterTests {
     /// somewhere backed up, they must not ride into iCloud or local backups.
     @Test func `the directory the writer creates is excluded from backups`() async throws {
         try await withTemporaryDirectory { directory in
-            let logs = directory.appendingPathComponent("Logs", isDirectory: true)
+            let logs = directory.appending(path: "Logs", directoryHint: .isDirectory)
             let writer = FileWriter(directory: logs, maxFileSize: 1024, maxFileCount: 3)
             await writer.write("[INFO] line\n")
 
@@ -72,7 +72,7 @@ struct FileWriterTests {
     /// silently pull the host's co-located files out of backups too.
     @Test func `a pre-existing directory is not marked excluded from backups`() async throws {
         try await withTemporaryDirectory { directory in
-            let owned = directory.appendingPathComponent("Logs", isDirectory: true)
+            let owned = directory.appending(path: "Logs", directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: owned, withIntermediateDirectories: true)
 
             let writer = FileWriter(directory: owned, maxFileSize: 1024, maxFileCount: 3)
