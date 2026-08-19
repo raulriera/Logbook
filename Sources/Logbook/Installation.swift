@@ -9,8 +9,8 @@ final class Installation: Sendable {
     private let minimumLevel: LogLevel
     private let middleware: [any LogMiddleware]
     private let ringBuffer: RingBuffer
-    private let fileWriter: FileWriter?
     private let fileBuffer: FileWriteBuffer?
+    private let exporter: LogExporter?
     private let loggers = Mutex<[String: os.Logger]>([:])
 
     init(subsystem: String, configuration: Logbook.Configuration) {
@@ -25,11 +25,12 @@ final class Installation: Sendable {
                 maxFileSize: files.maxFileSize,
                 maxFileCount: files.maxFileCount
             )
-            self.fileWriter = writer
-            self.fileBuffer = FileWriteBuffer(writer: writer, flushThreshold: files.flushThreshold)
+            let buffer = FileWriteBuffer(writer: writer, flushThreshold: files.flushThreshold)
+            self.fileBuffer = buffer
+            self.exporter = LogExporter(subsystem: subsystem, writer: writer, buffer: buffer)
         } else {
-            self.fileWriter = nil
             self.fileBuffer = nil
+            self.exporter = nil
         }
     }
 
@@ -77,51 +78,13 @@ final class Installation: Sendable {
         await fileBuffer?.flush()
     }
 
-    /// Concatenates every log file into one file in the temporary directory and
-    /// returns it, streaming so a large history never lands in memory at once.
+    /// Every log file gathered into one shareable file in the temporary directory.
     func exportLogs() async throws -> URL {
-        guard let fileBuffer, let fileWriter else { throw LogExportError.noLogsAvailable }
-
-        await fileBuffer.flush()
-
-        let sources = await fileWriter.fileURLs()
-        guard !sources.isEmpty else { throw LogExportError.noLogsAvailable }
-
-        // Its own directory, so the name can stay the friendly thing a person
-        // sees on the share sheet: the stamp is only good to the second, and two
-        // exports that close together would otherwise be one file.
-        let home = FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-
-        let destination = home.appending(
-            path: "\(exportName)-logs-\(Self.stamp.format(Date())).log")
-        FileManager.default.createFile(atPath: destination.path, contents: nil)
-
-        let output = try FileHandle(forWritingTo: destination)
-        defer { try? output.close() }
-
-        for source in sources {
-            guard let input = try? FileHandle(forReadingFrom: source) else { continue }
-            defer { try? input.close() }
-
-            while let chunk = try input.read(upToCount: Self.chunkSize), !chunk.isEmpty {
-                try output.write(contentsOf: chunk)
-            }
-        }
-
-        return destination
+        guard let exporter else { throw LogExportError.noLogsAvailable }
+        return try await exporter.export()
     }
 
     // MARK: - Private
-
-    private static let chunkSize = 64 * 1024
-
-    /// The last component of the subsystem, so an exported file is recognisable
-    /// as belonging to this app rather than to a reverse-DNS string.
-    private var exportName: String {
-        subsystem.split(separator: ".").last.map(String.init) ?? subsystem
-    }
 
     private static var defaultDirectory: URL {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
@@ -129,35 +92,12 @@ final class Installation: Sendable {
         return caches.appendingPathComponent("Logs", isDirectory: true)
     }
 
-    private static let stamp = Date.VerbatimFormatStyle(
-        format: """
-            \(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits)-\
-            \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))\
-            \(minute: .twoDigits)\(second: .twoDigits)
-            """,
-        locale: Locale(identifier: "en_US_POSIX"),
-        timeZone: .gmt,
-        calendar: Calendar(identifier: .gregorian)
-    )
-
     private func logger(for category: String) -> os.Logger {
         loggers.withLock { loggers in
             if let existing = loggers[category] { return existing }
             let created = os.Logger(subsystem: subsystem, category: category)
             loggers[category] = created
             return created
-        }
-    }
-}
-
-/// Why a log export could not be produced.
-public enum LogExportError: Error, Equatable, LocalizedError {
-    /// Nothing has been written to disk, or file logging is switched off.
-    case noLogsAvailable
-
-    public var errorDescription: String? {
-        switch self {
-        case .noLogsAvailable: "There are no logs to share yet."
         }
     }
 }
