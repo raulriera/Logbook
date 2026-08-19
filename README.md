@@ -78,9 +78,11 @@ has been written or file logging is off.
 ## Notes
 
 - Timestamps are UTC, so an exported log reads the same wherever it is opened.
-- Formatted lines are recorded to the unified log as `.public`. Middleware is the
-  single place values are scrubbed; marking them private here would hide them in
-  Console while the exported file still carried them in full.
+- Each file line ends with the call site, as `(file:line)`. The unified log never
+  receives it; Console shows its own source metadata.
+- The message and metadata text is recorded to the unified log as `.public`.
+  Middleware is the single place values are scrubbed; marking them private here
+  would hide them in Console while the exported file still carried them in full.
 - Before `bootstrap`, only the message reaches the unified log — metadata is
   dropped rather than risked, since no middleware exists yet to scrub it.
 - `subsystem` defaults to the main bundle identifier. Pass the host app's

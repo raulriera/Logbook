@@ -24,10 +24,10 @@ struct BootstrapTests {
     @Test func `the name a Log is built with becomes the entry category`() {
         bootstrapInMemory()
 
-        Log("ColorMatch").warning("Saliency failed", metadata: ["error": "boom"])
+        Log("Networking").warning("Request failed", metadata: ["error": "boom"])
 
         let recorded = Logbook.recentEntries().last
-        #expect(recorded?.contains(" ColorMatch Saliency failed error=boom") == true)
+        #expect(recorded?.contains(" Networking Request failed error=boom") == true)
         #expect(recorded?.hasPrefix("[WARNING] ") == true)
     }
 

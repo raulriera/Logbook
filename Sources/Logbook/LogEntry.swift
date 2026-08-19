@@ -36,9 +36,9 @@ public struct LogEntry: Sendable {
         self.line = line
     }
 
-    /// Renders the entry as one line for the file sink, which has no metadata
-    /// of its own and so carries everything — including the call site the
-    /// unified log cannot record for us.
+    /// Renders the entry as one line for the file sink and `recentEntries`,
+    /// which have no metadata of their own and so carry everything — including
+    /// the call site the unified log cannot record for us.
     public func formatted() -> String {
         "[\(level.rawValue.uppercased())] \(UTCFormat.line.format(timestamp))Z \(category) \(consoleText) (\(file):\(line))"
     }
