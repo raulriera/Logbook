@@ -2,12 +2,6 @@ import Testing
 import os
 @testable import Logbook
 
-extension Tag {
-    @Tag static var core: Self
-    @Tag static var middleware: Self
-    @Tag static var sinks: Self
-}
-
 @Suite("Log level", .tags(.core))
 struct LogLevelTests {
     @Test func `levels order by severity`() {

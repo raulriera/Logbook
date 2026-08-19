@@ -2,23 +2,10 @@ import Foundation
 import Testing
 @testable import Logbook
 
-private func makeEntry(metadata: [String: String]) -> LogEntry {
-    LogEntry(
-        timestamp: Date(timeIntervalSince1970: 1_774_521_135),
-        level: .info,
-        message: "Test",
-        metadata: metadata,
-        category: "Test",
-        file: "Test.swift",
-        function: "test()",
-        line: 1
-    )
-}
-
 @Suite("Sensitive key redactor", .tags(.middleware))
 struct SensitiveKeyRedactorTests {
     @Test func `keys containing a sensitive word lose their value`() {
-        var entry = makeEntry(metadata: [
+        var entry = LogEntry.stub(metadata: [
             "apiToken": "abc123",
             "ownerKey": "5xJ2k",
             "userEmail": "test@example.com",
@@ -35,7 +22,7 @@ struct SensitiveKeyRedactorTests {
     }
 
     @Test func `keyword matching ignores case`() {
-        var entry = makeEntry(metadata: ["AccessToken": "xyz", "SECRET_VALUE": "hidden"])
+        var entry = LogEntry.stub(metadata: ["AccessToken": "xyz", "SECRET_VALUE": "hidden"])
 
         _ = SensitiveKeyRedactor().process(&entry)
 
@@ -44,7 +31,7 @@ struct SensitiveKeyRedactorTests {
     }
 
     @Test func `custom keywords replace the defaults rather than extending them`() {
-        var entry = makeEntry(metadata: ["mintAddress": "abc", "apiToken": "xyz"])
+        var entry = LogEntry.stub(metadata: ["mintAddress": "abc", "apiToken": "xyz"])
 
         _ = SensitiveKeyRedactor(keywords: ["mint"]).process(&entry)
 
@@ -53,7 +40,7 @@ struct SensitiveKeyRedactorTests {
     }
 
     @Test func `an entry without metadata passes through untouched`() {
-        var entry = makeEntry(metadata: [:])
+        var entry = LogEntry.stub(metadata: [:])
 
         #expect(SensitiveKeyRedactor().process(&entry))
         #expect(entry.metadata.isEmpty)
@@ -63,7 +50,7 @@ struct SensitiveKeyRedactorTests {
 @Suite("Pattern redactor", .tags(.middleware))
 struct PatternRedactorTests {
     @Test func `an email keeps its first character and domain`() {
-        var entry = makeEntry(metadata: [
+        var entry = LogEntry.stub(metadata: [
             "contact": "user@example.com",
             "shortLocal": "a@b.com",
             "status": "active",
@@ -77,7 +64,7 @@ struct PatternRedactorTests {
     }
 
     @Test func `a phone number keeps only its last four digits`() {
-        var entry = makeEntry(metadata: [
+        var entry = LogEntry.stub(metadata: [
             "withParens": "(415) 555-4321",
             "withCountry": "+1-415-555-1234",
         ])
@@ -89,7 +76,7 @@ struct PatternRedactorTests {
     }
 
     @Test func `an all digit string survives, so counts and amounts stay readable`() {
-        var entry = makeEntry(metadata: ["quarks": "4155551234", "count": "42"])
+        var entry = LogEntry.stub(metadata: ["quarks": "4155551234", "count": "42"])
 
         _ = PatternRedactor().process(&entry)
 
@@ -98,7 +85,7 @@ struct PatternRedactorTests {
     }
 
     @Test func `a date survives, so it is not mistaken for a phone number`() {
-        var entry = makeEntry(metadata: ["day": "2026-03-26"])
+        var entry = LogEntry.stub(metadata: ["day": "2026-03-26"])
 
         _ = PatternRedactor().process(&entry)
 
@@ -107,8 +94,8 @@ struct PatternRedactorTests {
 
     @Test func `base58 stays intact unless the rule is enabled`() {
         let address = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d"
-        var byDefault = makeEntry(metadata: ["mint": address])
-        var enabled = makeEntry(metadata: ["mint": address])
+        var byDefault = LogEntry.stub(metadata: ["mint": address])
+        var enabled = LogEntry.stub(metadata: ["mint": address])
 
         _ = PatternRedactor().process(&byDefault)
         _ = PatternRedactor(rules: [.base58(minLength: 32)]).process(&enabled)
@@ -118,7 +105,7 @@ struct PatternRedactorTests {
     }
 
     @Test func `short words are left alone`() {
-        var entry = makeEntry(metadata: ["code": "USD", "name": "Rosemary"])
+        var entry = LogEntry.stub(metadata: ["code": "USD", "name": "Rosemary"])
 
         _ = PatternRedactor(rules: [.email, .phone, .base58(minLength: 32)]).process(&entry)
 

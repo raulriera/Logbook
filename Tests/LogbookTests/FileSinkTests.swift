@@ -2,15 +2,6 @@ import Foundation
 import Testing
 @testable import Logbook
 
-/// Creates a directory that is removed when `body` returns.
-private func withTemporaryDirectory(_ body: (URL) async throws -> Void) async throws {
-    let directory = FileManager.default.temporaryDirectory
-        .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    try await body(directory)
-}
-
 @Suite("File writer", .tags(.sinks))
 struct FileWriterTests {
     @Test func `writes land in a single file while they fit`() async throws {
