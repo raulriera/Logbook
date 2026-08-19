@@ -93,9 +93,13 @@ actor FileWriter {
         // Logs are regenerable diagnostics, so a directory the writer itself
         // creates is kept out of iCloud and local backups. One the host already
         // owns is left as found: it may hold more than logs, and the exclusion
-        // mark is sticky.
-        let created = !manager.fileExists(atPath: directory.path)
-        try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        // mark is sticky. Creating the leaf with intermediates off makes "ours
+        // to stamp" atomic — an existing directory fails the create rather
+        // than racing an exists check.
+        try? manager.createDirectory(
+            at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let created =
+            (try? manager.createDirectory(at: directory, withIntermediateDirectories: false)) != nil
         if created {
             var excluded = directory
             var values = URLResourceValues()
