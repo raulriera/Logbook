@@ -70,15 +70,26 @@ actor FileWriter {
         directory.appending(path: "app-\(index).log")
     }
 
-    /// The index of the most recently modified `app-N.log`, or the first index
-    /// where none exists or the newest does not fit the current rotation.
+    /// The index of the most recently modified `app-N.log` within the current
+    /// rotation, or the first index where none exists. Only the writer's own
+    /// names count: a foreign log file in a shared directory must not reset
+    /// the cycle onto the oldest history.
+    ///
+    /// Files a larger rotation left beyond `maxFileCount` are deleted here —
+    /// nothing would ever empty them again, and they would ride along in every
+    /// export.
     private func resumeIndex() -> Int {
-        let newest = fileURLs().last { $0.lastPathComponent.hasPrefix("app-") }
-        guard let newest,
-              let index = Int(newest.deletingPathExtension().lastPathComponent.dropFirst(4)),
-              index < maxFileCount
-        else { return 0 }
-        return index
+        let candidates = fileURLs().compactMap { file -> (index: Int, url: URL)? in
+            let name = file.deletingPathExtension().lastPathComponent
+            guard name.hasPrefix("app-"), let index = Int(name.dropFirst(4)) else { return nil }
+            return (index, file)
+        }
+
+        for candidate in candidates where candidate.index >= maxFileCount {
+            try? FileManager.default.removeItem(at: candidate.url)
+        }
+
+        return candidates.last { (0..<maxFileCount).contains($0.index) }?.index ?? 0
     }
 
     private func modificationDate(of url: URL) -> Date {

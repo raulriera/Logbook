@@ -83,6 +83,47 @@ struct FileWriterTests {
         }
     }
 
+    /// Only the writer's own `app-N.log` names count for resumption: a foreign
+    /// log file in a shared directory must not reset the cycle onto the oldest
+    /// history.
+    @Test func `resumption ignores log files that are not the writer's own`() async throws {
+        try await withTemporaryDirectory { directory in
+            let first = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
+            await first.write(String(repeating: "a", count: 29) + "\n")
+            try await Task.sleep(for: .milliseconds(20))
+            await first.write(String(repeating: "b", count: 79) + "\n")
+            try await Task.sleep(for: .milliseconds(20))
+            try Data("foreign\n".utf8).write(to: directory.appending(path: "app-events.log"))
+
+            let second = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
+            await second.write("[INFO] two\n")
+
+            let zero = try String(contentsOf: directory.appending(path: "app-0.log"), encoding: .utf8)
+            let one = try String(contentsOf: directory.appending(path: "app-1.log"), encoding: .utf8)
+            #expect(zero == String(repeating: "a", count: 29) + "\n")
+            #expect(one == String(repeating: "b", count: 79) + "\n[INFO] two\n")
+        }
+    }
+
+    /// Shrinking `maxFileCount` must not orphan files the larger rotation
+    /// created: nothing would ever empty them again, and they would ride along
+    /// in every export.
+    @Test func `files a larger rotation left behind are deleted on resume`() async throws {
+        try await withTemporaryDirectory { directory in
+            for index in 0..<5 {
+                try Data("old-\(index)\n".utf8).write(to: directory.appending(path: "app-\(index).log"))
+            }
+
+            let writer = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
+            await writer.write("[INFO] fresh\n")
+
+            let names = try FileManager.default
+                .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .map(\.lastPathComponent).sorted()
+            #expect(names == ["app-0.log", "app-1.log", "app-2.log"])
+        }
+    }
+
     /// Resuming a file that is already at the limit must roll before writing,
     /// exactly as if the process had never restarted.
     @Test func `a resumed file that is already full rotates before the next line`() async throws {
