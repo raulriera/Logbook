@@ -57,5 +57,4 @@ public struct LogEntry: Sendable {
             .joined(separator: " ")
         return "\(message) \(pairs)"
     }
-
 }
