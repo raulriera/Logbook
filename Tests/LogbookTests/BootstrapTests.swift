@@ -3,7 +3,7 @@ import Testing
 @testable import Logbook
 
 /// Serialized because these exercise the process-wide installation.
-@Suite("Bootstrap", .serialized, .tags(.core))
+@Suite("Bootstrap", .serialized, .tags(.core), .timeLimit(.minutes(1)))
 struct BootstrapTests {
     private func bootstrapInMemory() {
         Logbook.bootstrap(
@@ -21,14 +21,14 @@ struct BootstrapTests {
         #expect(Logbook.recentEntries().contains { $0.contains("after bootstrap") })
     }
 
-    @Test func `the name a Log is built with becomes the entry category`() {
+    @Test func `the name a Log is built with becomes the entry category`() throws {
         bootstrapInMemory()
 
         Log("Networking").warning("Request failed", metadata: ["error": "boom"])
 
-        let recorded = Logbook.recentEntries().last
-        #expect(recorded?.contains(" Networking Request failed error=boom") == true)
-        #expect(recorded?.hasPrefix("[WARNING] ") == true)
+        let recorded = try #require(Logbook.recentEntries().last)
+        #expect(recorded.contains(" Networking Request failed error=boom"))
+        #expect(recorded.hasPrefix("[WARNING] "))
     }
 
     @Test func `bootstrapping again replaces the previous installation`() {

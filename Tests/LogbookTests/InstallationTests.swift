@@ -47,14 +47,15 @@ private final class ProcessCounter: LogMiddleware {
 
 @Suite("Log pipeline", .tags(.core))
 struct InstallationTests {
-    @Test func `an entry below the minimum level is not recorded`() {
+    @Test func `an entry below the minimum level is not recorded`() throws {
         let installation = makeInstallation(minimumLevel: .warning)
 
         installation.record(level: .info, message: "quiet", category: "Test", metadata: { [:] })
         installation.record(level: .error, message: "loud", category: "Test", metadata: { [:] })
 
-        #expect(installation.recentEntries().count == 1)
-        #expect(installation.recentEntries()[0].contains("loud"))
+        let entries = installation.recentEntries()
+        #expect(entries.count == 1)
+        #expect(try #require(entries.first).contains("loud"))
     }
 
     @Test func `metadata is never built for an entry that will be dropped`() {
@@ -77,12 +78,13 @@ struct InstallationTests {
         #expect(installation.recentEntries().isEmpty)
     }
 
-    @Test func `middleware runs in array order, each seeing the previous rewrite`() {
+    @Test func `middleware runs in array order, each seeing the previous rewrite`() throws {
         let installation = makeInstallation(middleware: [Mark(name: "a"), Mark(name: "b")])
 
         installation.record(level: .info, message: "walk", category: "Test", metadata: { [:] })
 
-        #expect(installation.recentEntries()[0].contains("trail=ab"))
+        let recorded = try #require(installation.recentEntries().first)
+        #expect(recorded.contains("trail=ab"))
     }
 
     @Test func `a middleware returning false stops the steps after it`() {
@@ -95,20 +97,20 @@ struct InstallationTests {
         #expect(after.count == 0)
     }
 
-    @Test func `a middleware rewrite reaches the recorded entry`() {
+    @Test func `a middleware rewrite reaches the recorded entry`() throws {
         let installation = makeInstallation(middleware: [SensitiveKeyRedactor()])
 
         installation.record(level: .info, message: "Signed in", category: "Auth", metadata: {
             ["apiToken": "abc123", "user": "raul"]
         })
 
-        let recorded = installation.recentEntries()[0]
+        let recorded = try #require(installation.recentEntries().first)
         #expect(recorded.contains("apiToken=[REDACTED]"))
         #expect(recorded.contains("user=raul"))
         #expect(!recorded.contains("abc123"))
     }
 
-    @Test func `recent entries come back newest last and already formatted`() {
+    @Test func `recent entries come back newest last and already formatted`() throws {
         let installation = makeInstallation()
 
         for i in 0..<3 {
@@ -116,12 +118,12 @@ struct InstallationTests {
         }
 
         let entries = installation.recentEntries()
-        #expect(entries.count == 3)
+        try #require(entries.count == 3)
         #expect(entries[0].hasPrefix("[INFO] "))
         #expect(entries[2].contains("step-2"))
     }
 
-    @Test func `recent entries can be narrowed to the newest few`() {
+    @Test func `recent entries can be narrowed to the newest few`() throws {
         let installation = makeInstallation()
 
         for i in 0..<5 {
@@ -129,7 +131,7 @@ struct InstallationTests {
         }
 
         let entries = installation.recentEntries(last: 2)
-        #expect(entries.count == 2)
+        try #require(entries.count == 2)
         #expect(entries[0].contains("step-3"))
         #expect(entries[1].contains("step-4"))
     }
@@ -143,7 +145,7 @@ struct InstallationTests {
     }
 }
 
-@Suite("Log export", .tags(.sinks))
+@Suite("Log export", .tags(.sinks), .timeLimit(.minutes(1)))
 struct LogExportTests {
     @Test func `an export gathers everything written so far`() async throws {
         try await withTemporaryDirectory { directory in
@@ -229,15 +231,23 @@ struct LogExportTests {
             let installation = makeInstallation(files: .init(directory: directory, flushThreshold: 100))
             installation.record(level: .info, message: "shared", category: "Test", metadata: { [:] })
 
-            let first = try await installation.exportLogs()
-            let second = try await installation.exportLogs()
+            // The pair can straddle a second boundary; retry until both land
+            // inside one, so the name collision under test actually occurs.
+            var first = try await installation.exportLogs()
+            var second = try await installation.exportLogs()
+            var attempts = 0
+            while first.lastPathComponent != second.lastPathComponent, attempts < 3 {
+                attempts += 1
+                first = try await installation.exportLogs()
+                second = try await installation.exportLogs()
+            }
             defer {
                 try? FileManager.default.removeItem(at: first)
                 try? FileManager.default.removeItem(at: second)
             }
 
+            try #require(first.lastPathComponent == second.lastPathComponent)
             #expect(first != second)
-            #expect(first.lastPathComponent == second.lastPathComponent)
             #expect(FileManager.default.fileExists(atPath: first.path))
             #expect(FileManager.default.fileExists(atPath: second.path))
         }
