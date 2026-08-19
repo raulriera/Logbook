@@ -63,18 +63,24 @@ struct FileWriterTests {
         }
     }
 
+    /// Generation one of a two-launch fixture: a 30-byte line in `app-0`, an
+    /// 80-byte line rotated onto `app-1` (30 + 80 > 100) with room left for
+    /// one more short line, and `app-0` stamped older — the state a relaunch
+    /// resumes into.
+    private func seedResumedPair(in directory: URL) async throws {
+        let first = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
+        await first.write(String(repeating: "a", count: 29) + "\n")
+        await first.write(String(repeating: "b", count: 79) + "\n")
+        try setModificationDate(Date(timeIntervalSince1970: 5_000), for: directory.appending(path: "app-0.log"))
+        try setModificationDate(Date(timeIntervalSince1970: 5_001), for: directory.appending(path: "app-1.log"))
+    }
+
     /// A relaunch resumes on the newest file. Restarting at the first instead
     /// would put new lines under the oldest history — and let the first
     /// rotation truncate the newest.
     @Test func `a new writer resumes on the most recently written file`() async throws {
         try await withTemporaryDirectory { directory in
-            let first = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
-            // 30 bytes into app-0; the 80-byte line then rotates onto app-1
-            // (30 + 80 > 100) and leaves it room for one more short line.
-            await first.write(String(repeating: "a", count: 29) + "\n")
-            // Resumption rests on modification dates; space the two files out.
-            try await Task.sleep(for: .milliseconds(20))
-            await first.write(String(repeating: "b", count: 79) + "\n")
+            try await seedResumedPair(in: directory)
 
             let second = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
             await second.write("[INFO] two\n")
@@ -91,12 +97,10 @@ struct FileWriterTests {
     /// history.
     @Test func `resumption ignores log files that are not the writer's own`() async throws {
         try await withTemporaryDirectory { directory in
-            let first = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
-            await first.write(String(repeating: "a", count: 29) + "\n")
-            try await Task.sleep(for: .milliseconds(20))
-            await first.write(String(repeating: "b", count: 79) + "\n")
-            try await Task.sleep(for: .milliseconds(20))
-            try Data("foreign\n".utf8).write(to: directory.appending(path: "app-events.log"))
+            try await seedResumedPair(in: directory)
+            let foreign = directory.appending(path: "app-events.log")
+            try Data("foreign\n".utf8).write(to: foreign)
+            try setModificationDate(Date(timeIntervalSince1970: 5_002), for: foreign)
 
             let second = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
             await second.write("[INFO] two\n")
@@ -108,22 +112,103 @@ struct FileWriterTests {
         }
     }
 
-    /// Shrinking `maxFileCount` must not orphan files the larger rotation
-    /// created: nothing would ever empty them again, and they would ride along
-    /// in every export.
-    @Test func `files a larger rotation left behind are deleted on resume`() async throws {
+    /// Shrinking `maxFileCount` must not destroy the newest history: a file
+    /// beyond the new bound survives — and keeps riding exports — until every
+    /// in-range file has outlived it.
+    @Test func `a file beyond the rotation survives while it holds the newest history`() async throws {
         try await withTemporaryDirectory { directory in
             for index in 0..<5 {
-                try Data("old-\(index)\n".utf8).write(to: directory.appending(path: "app-\(index).log"))
+                let url = directory.appending(path: "app-\(index).log")
+                try Data("old-\(index)\n".utf8).write(to: url)
+                try setModificationDate(Date(timeIntervalSince1970: 1_000 + TimeInterval(index)), for: url)
             }
 
-            let writer = FileWriter(directory: directory, maxFileSize: 100, maxFileCount: 3)
+            let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
             await writer.write("[INFO] fresh\n")
 
-            let names = try FileManager.default
-                .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-                .map(\.lastPathComponent).sorted()
-            #expect(names == ["app-0.log", "app-1.log", "app-2.log"])
+            let listed = await writer.fileURLs().map(\.lastPathComponent)
+            #expect(listed.contains("app-3.log"))
+            #expect(listed.contains("app-4.log"))
+        }
+    }
+
+    /// Once the rotation has lapped a stranded file, it is reaped — even in a
+    /// process that only reads: an export must not carry it forever.
+    @Test func `a file the rotation has lapped is reaped before listing`() async throws {
+        try await withTemporaryDirectory { directory in
+            for index in 0..<3 {
+                let url = directory.appending(path: "app-\(index).log")
+                try Data("current-\(index)\n".utf8).write(to: url)
+                try setModificationDate(Date(timeIntervalSince1970: 2_000 + TimeInterval(index)), for: url)
+            }
+            let lapped = directory.appending(path: "app-4.log")
+            try Data("lapped\n".utf8).write(to: lapped)
+            try setModificationDate(Date(timeIntervalSince1970: 1_000), for: lapped)
+
+            let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
+
+            #expect(await writer.fileURLs().map(\.lastPathComponent) == ["app-0.log", "app-1.log", "app-2.log"])
+            #expect(!FileManager.default.fileExists(atPath: lapped.path))
+        }
+    }
+
+    /// `fileURLs()` feeds the export; a foreign log file in a shared directory
+    /// is not ours to share.
+    @Test func `a foreign log file is not listed for export`() async throws {
+        try await withTemporaryDirectory { directory in
+            let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
+            await writer.write("[INFO] ours\n")
+            try Data("not ours\n".utf8).write(to: directory.appending(path: "events.log"))
+
+            #expect(await writer.fileURLs().map(\.lastPathComponent) == ["app-0.log"])
+        }
+    }
+
+    /// `app-01.log` parses as index 1 but is not the file the writer would
+    /// create for index 1; treating it as ours would resume onto the wrong
+    /// content.
+    @Test func `a non-canonical name is not treated as the writer's own`() async throws {
+        try await withTemporaryDirectory { directory in
+            let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
+            await writer.write("[INFO] ours\n")
+            try Data("imposter\n".utf8).write(to: directory.appending(path: "app-01.log"))
+
+            #expect(await writer.fileURLs().map(\.lastPathComponent) == ["app-0.log"])
+        }
+    }
+
+    /// The system may purge a Caches directory while the process runs;
+    /// rotation recreates it and keeps logging instead of going dark for good.
+    @Test func `rotation survives the directory being purged mid-run`() async throws {
+        try await withTemporaryDirectory { directory in
+            let logs = directory.appending(path: "Logs", directoryHint: .isDirectory)
+            let writer = FileWriter(directory: logs, maxFileSize: 40, maxFileCount: 3)
+            await writer.write(String(repeating: "x", count: 39) + "\n")
+
+            try FileManager.default.removeItem(at: logs)
+            await writer.write("[INFO] after purge\n")
+
+            let contents = try await writer.fileURLs().map { try String(contentsOf: $0, encoding: .utf8) }
+            #expect(contents.contains { $0.contains("after purge") })
+        }
+    }
+
+    /// Two files stamped in the same instant (a backup restore can do this)
+    /// must still resume deterministically: the higher index wins the tie.
+    @Test func `equal modification dates resume on the higher index`() async throws {
+        try await withTemporaryDirectory { directory in
+            let tie = Date(timeIntervalSince1970: 3_000)
+            for index in 0..<2 {
+                let url = directory.appending(path: "app-\(index).log")
+                try Data("tied-\(index)\n".utf8).write(to: url)
+                try setModificationDate(tie, for: url)
+            }
+
+            let writer = FileWriter(directory: directory, maxFileSize: 1024, maxFileCount: 3)
+            await writer.write("[INFO] resumed\n")
+
+            let one = try String(contentsOf: directory.appending(path: "app-1.log"), encoding: .utf8)
+            #expect(one == "tied-1\n[INFO] resumed\n")
         }
     }
 
@@ -172,10 +257,7 @@ struct FileWriterTests {
             let writer = FileWriter(directory: logs, maxFileSize: 1024, maxFileCount: 3)
             await writer.write("[INFO] line\n")
 
-            let excluded = try URL(fileURLWithPath: logs.path)
-                .resourceValues(forKeys: [.isExcludedFromBackupKey])
-                .isExcludedFromBackup
-            #expect(excluded == true)
+            #expect(backupExclusion(of: logs) == true)
         }
     }
 
@@ -189,10 +271,7 @@ struct FileWriterTests {
             let writer = FileWriter(directory: owned, maxFileSize: 1024, maxFileCount: 3)
             await writer.write("[INFO] line\n")
 
-            let excluded = try URL(fileURLWithPath: owned.path)
-                .resourceValues(forKeys: [.isExcludedFromBackupKey])
-                .isExcludedFromBackup
-            #expect(excluded != true)
+            #expect(backupExclusion(of: owned) != true)
         }
     }
 
@@ -239,7 +318,9 @@ struct FileWriteBufferTests {
             buffer.append("one\n")
             buffer.append("two\n")
 
-            for _ in 0..<100 where await writer.fileURLs().isEmpty {
+            var attempts = 0
+            while await writer.fileURLs().isEmpty, attempts < 100 {
+                attempts += 1
                 try await Task.sleep(for: .milliseconds(10))
             }
 

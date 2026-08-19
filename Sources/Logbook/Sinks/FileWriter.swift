@@ -15,6 +15,7 @@ actor FileWriter {
     private var handle: FileHandle?
     private var bytesWritten = 0
     private var disabled = false
+    private var prepared = false
 
     init(directory: URL, maxFileSize: Int, maxFileCount: Int) {
         precondition(maxFileSize > 0, "A log file needs room for at least one byte")
@@ -33,7 +34,7 @@ actor FileWriter {
         // the file the previous run stopped in, rather than putting new lines
         // under the oldest history and truncating the newest at first rotation.
         if handle == nil {
-            fileIndex = resumeIndex()
+            prepareIfNeeded()
             openCurrentFile()
         }
         guard !disabled else { return }
@@ -49,8 +50,34 @@ actor FileWriter {
         }
     }
 
-    /// Existing log files, oldest first, which is the order an export reads them in.
+    /// The writer's own log files, oldest first — the order an export reads
+    /// them in. Only canonical `app-N.log` names count: a shared directory may
+    /// hold logs that are not ours to rotate, and not ours to share.
     func fileURLs() -> [URL] {
+        prepareIfNeeded()
+        return ownFiles().map(\.url)
+    }
+
+    // MARK: - Private
+
+    private struct Candidate {
+        let index: Int
+        let url: URL
+        let modified: Date
+    }
+
+    private static func fileName(index: Int) -> String { "app-\(index).log" }
+
+    private func fileURL(index: Int) -> URL {
+        directory.appending(path: Self.fileName(index: index))
+    }
+
+    /// Canonical own files, oldest first. The round-trip through
+    /// `fileName(index:)` rejects imposters like `app-01.log`, which parse to
+    /// an index whose real file is a different URL. Equal dates order by
+    /// index, so resumption stays deterministic when a restore flattens
+    /// timestamps.
+    private func ownFiles() -> [Candidate] {
         let manager = FileManager.default
         guard let files = try? manager.contentsOfDirectory(
             at: directory,
@@ -60,36 +87,17 @@ actor FileWriter {
         }
 
         return files
-            .filter { $0.pathExtension == "log" }
-            .sorted { modificationDate(of: $0) < modificationDate(of: $1) }
-    }
-
-    // MARK: - Private
-
-    private func fileURL(index: Int) -> URL {
-        directory.appending(path: "app-\(index).log")
-    }
-
-    /// The index of the most recently modified `app-N.log` within the current
-    /// rotation, or the first index where none exists. Only the writer's own
-    /// names count: a foreign log file in a shared directory must not reset
-    /// the cycle onto the oldest history.
-    ///
-    /// Files a larger rotation left beyond `maxFileCount` are deleted here —
-    /// nothing would ever empty them again, and they would ride along in every
-    /// export.
-    private func resumeIndex() -> Int {
-        let candidates = fileURLs().compactMap { file -> (index: Int, url: URL)? in
-            let name = file.deletingPathExtension().lastPathComponent
-            guard name.hasPrefix("app-"), let index = Int(name.dropFirst(4)) else { return nil }
-            return (index, file)
-        }
-
-        for candidate in candidates where candidate.index >= maxFileCount {
-            try? FileManager.default.removeItem(at: candidate.url)
-        }
-
-        return candidates.last { (0..<maxFileCount).contains($0.index) }?.index ?? 0
+            .compactMap { url -> Candidate? in
+                let name = url.deletingPathExtension().lastPathComponent
+                guard name.hasPrefix("app-"),
+                      let index = Int(name.dropFirst(4)), index >= 0,
+                      url.lastPathComponent == Self.fileName(index: index)
+                else { return nil }
+                return Candidate(index: index, url: url, modified: modificationDate(of: url))
+            }
+            .sorted {
+                $0.modified != $1.modified ? $0.modified < $1.modified : $0.index < $1.index
+            }
     }
 
     private func modificationDate(of url: URL) -> Date {
@@ -97,8 +105,33 @@ actor FileWriter {
             ?? .distantPast
     }
 
-    private func openCurrentFile() {
-        let url = fileURL(index: fileIndex)
+    /// Once per process, before the first read or write of the directory:
+    /// adopt the file the previous run stopped in, and reap files a larger
+    /// rotation stranded beyond `maxFileCount` — but only once every in-range
+    /// file has outlived them. Shrinking the rotation therefore never destroys
+    /// the newest history, and disk use still converges to the new bound
+    /// within one full cycle.
+    private func prepareIfNeeded() {
+        guard !prepared else { return }
+        prepared = true
+
+        let files = ownFiles()
+        let inRange = files.filter { (0..<maxFileCount).contains($0.index) }
+
+        if let oldestInRange = inRange.first?.modified {
+            for stranded in files
+            where stranded.index >= maxFileCount && stranded.modified < oldestInRange {
+                try? FileManager.default.removeItem(at: stranded.url)
+            }
+        }
+
+        fileIndex = inRange.last?.index ?? 0
+    }
+
+    /// Re-run before every open and rotation, not once: the system may purge a
+    /// Caches directory while the process runs, and logging must survive the
+    /// loss.
+    private func prepareDirectory() {
         let manager = FileManager.default
 
         // Logs are regenerable diagnostics, so a directory the writer itself
@@ -117,7 +150,13 @@ actor FileWriter {
             values.isExcludedFromBackup = true
             try? excluded.setResourceValues(values)
         }
+    }
 
+    private func openCurrentFile() {
+        let url = fileURL(index: fileIndex)
+        let manager = FileManager.default
+
+        prepareDirectory()
         if !manager.fileExists(atPath: url.path) {
             manager.createFile(atPath: url.path, contents: nil)
         }
@@ -137,7 +176,10 @@ actor FileWriter {
         bytesWritten = 0
 
         // Emptying the file we are about to reuse is what bounds total log size;
-        // failing to do so would append today's lines onto a stale pass.
+        // failing to do so would append today's lines onto a stale pass. The
+        // directory is re-provisioned first so a mid-run purge costs one
+        // rotation, not the rest of the process.
+        prepareDirectory()
         do {
             try Data().write(to: fileURL(index: fileIndex), options: .atomic)
         } catch {

@@ -18,6 +18,21 @@ func withTemporaryDirectory(_ body: (URL) async throws -> Void) async throws {
     try await body(directory)
 }
 
+/// Sets the file's modification date directly, so a test that depends on age
+/// ordering states it rather than sleeping for the clock to move.
+func setModificationDate(_ date: Date, for url: URL) throws {
+    try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+}
+
+/// Reads the backup-exclusion mark off disk. The URL is rebuilt from its path
+/// on purpose: resource values are cached per URL instance, and a reused
+/// instance can answer stale.
+func backupExclusion(of url: URL) -> Bool? {
+    try? URL(fileURLWithPath: url.path)
+        .resourceValues(forKeys: [.isExcludedFromBackupKey])
+        .isExcludedFromBackup
+}
+
 extension LogEntry {
     /// A concrete entry with every field fixed and any of them overridable.
     /// The timestamp renders as `2026-03-26 10:32:15Z`.
