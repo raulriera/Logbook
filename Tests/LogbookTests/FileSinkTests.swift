@@ -48,9 +48,9 @@ struct FileWriterTests {
             let writer = FileWriter(directory: directory, maxFileSize: 40, maxFileCount: 3)
             for i in 0..<10 { await writer.write("[INFO] message number \(i) padding\n") }
 
-            let files = await writer.fileURLs()
-            #expect(files.count > 1)
-            #expect(files.count <= 3)
+            // 32-byte lines against a 40-byte limit: ten writes cycle all
+            // three files exactly.
+            #expect(await writer.fileURLs().count == 3)
         }
     }
 
@@ -290,7 +290,7 @@ struct FileWriterTests {
     }
 }
 
-@Suite("File write buffer", .tags(.sinks))
+@Suite("File write buffer", .tags(.sinks), .timeLimit(.minutes(1)))
 struct FileWriteBufferTests {
     @Test func `lines below the threshold reach disk only once flushed`() async throws {
         try await withTemporaryDirectory { directory in
