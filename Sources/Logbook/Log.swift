@@ -1,5 +1,5 @@
 /// A named entry point for logging. The name becomes the unified log's
-/// category, so `Log("ColorMatch")` is filterable as such in Console.
+/// category, so `Log("Networking")` is filterable as such in Console.
 ///
 /// Keep `message` a constant and put every variable in `metadata`: middleware
 /// only scrubs metadata, so a value interpolated into the message reaches every
@@ -68,7 +68,7 @@ public struct Log: Sendable {
         emit(.warning, message, metadata, file, function, line)
     }
 
-    /// Records a failure a player can feel, whether or not a screen says so.
+    /// Records a failure the user can feel, whether or not a screen says so.
     public func error(
         _ message: String,
         metadata: @autoclosure () -> [String: String] = [:],

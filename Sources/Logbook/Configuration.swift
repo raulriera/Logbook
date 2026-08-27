@@ -18,12 +18,17 @@ extension Logbook {
         /// Where log files live and how much of them is kept.
         public struct FileOptions: Sendable {
             /// `nil` places them under `Caches/Logs`, which the system may
-            /// reclaim when space runs short.
+            /// reclaim when space runs short. A directory the writer creates
+            /// itself is excluded from backups; one that already exists is
+            /// left as found — but files named `app-N.log` inside it belong
+            /// to the writer's rotation, which empties and reaps them.
             public var directory: URL?
             /// Bytes a file may reach before the writer rolls onto the next.
             public var maxFileSize: Int
             /// How many files the rotation cycles through. The oldest is
             /// emptied and written over, which is what bounds total log size.
+            /// Shrinking the count strands files beyond it only until the new
+            /// cycle outlives them; the newest history is never discarded.
             public var maxFileCount: Int
             /// Lines held in memory before a batch is written.
             public var flushThreshold: Int
@@ -64,5 +69,14 @@ extension Logbook {
             self.files = files
             self.middleware = middleware
         }
+    }
+}
+
+extension Logbook.Configuration.FileOptions {
+    /// The directory the writer uses — the one seam `Installation` wires
+    /// through, so the `Caches/Logs` fallback stays testable without touching
+    /// the real location.
+    var resolvedDirectory: URL {
+        directory ?? Installation.defaultDirectory
     }
 }

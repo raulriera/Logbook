@@ -14,12 +14,16 @@ public enum Logbook {
     ///
     /// `subsystem` defaults to the main bundle identifier. Pass the host app's
     /// identifier from an app extension, where that default names the extension.
+    ///
+    /// Replacing an installation whose file batches are still landing can
+    /// interleave writes into the file the new one resumes on; `await
+    /// Logbook.flush()` first narrows that window.
     public static func bootstrap(
         subsystem: String? = nil,
         configuration: Configuration = Configuration()
     ) {
-        let resolved = subsystem ?? Bundle.main.bundleIdentifier ?? "Logbook"
-        let installation = Installation(subsystem: resolved, configuration: configuration)
+        let installation = Installation(
+            subsystem: subsystem ?? Self.defaultSubsystem, configuration: configuration)
         installed.withLock { $0 = installation }
     }
 
@@ -84,7 +88,11 @@ public enum Logbook {
     private static func recordBeforeBootstrap(level: LogLevel, message: String, category: String) {
         guard level >= .buildDefault else { return }
 
-        os.Logger(subsystem: Bundle.main.bundleIdentifier ?? "Logbook", category: category)
+        os.Logger(subsystem: defaultSubsystem, category: category)
             .log(level: level.osLogType, "\(message, privacy: .public)")
+    }
+
+    private static var defaultSubsystem: String {
+        Bundle.main.bundleIdentifier ?? "Logbook"
     }
 }

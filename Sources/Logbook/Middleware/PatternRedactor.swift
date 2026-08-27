@@ -68,6 +68,7 @@ public struct PatternRedactor: LogMiddleware {
 
     // Matching never mutates a pattern, so one compiled instance is safe to share
     // across threads; `Regex` simply has no `Sendable` conformance to say so.
+    // `nonisolated(unsafe)` outlives its need once that conformance lands.
 
     /// Captures the first character of the local part, the rest of it, and the domain.
     nonisolated(unsafe) private static let emailPattern =

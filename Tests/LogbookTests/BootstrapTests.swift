@@ -3,7 +3,7 @@ import Testing
 @testable import Logbook
 
 /// Serialized because these exercise the process-wide installation.
-@Suite("Bootstrap", .serialized, .tags(.core))
+@Suite("Bootstrap", .serialized, .tags(.core), .timeLimit(.minutes(1)))
 struct BootstrapTests {
     private func bootstrapInMemory() {
         Logbook.bootstrap(
@@ -21,14 +21,14 @@ struct BootstrapTests {
         #expect(Logbook.recentEntries().contains { $0.contains("after bootstrap") })
     }
 
-    @Test func `the name a Log is built with becomes the entry category`() {
+    @Test func `the name a Log is built with becomes the entry category`() throws {
         bootstrapInMemory()
 
-        Log("ColorMatch").warning("Saliency failed", metadata: ["error": "boom"])
+        Log("Networking").warning("Request failed", metadata: ["error": "boom"])
 
-        let recorded = Logbook.recentEntries().last
-        #expect(recorded?.contains(" ColorMatch Saliency failed error=boom") == true)
-        #expect(recorded?.hasPrefix("[WARNING] ") == true)
+        let recorded = try #require(Logbook.recentEntries().last)
+        #expect(recorded.contains(" Networking Request failed error=boom"))
+        #expect(recorded.hasPrefix("[WARNING] "))
     }
 
     @Test func `bootstrapping again replaces the previous installation`() {
@@ -43,23 +43,20 @@ struct BootstrapTests {
     /// A batch only reaches disk once it fills, so without this a launch that
     /// says little writes nothing — and loses it when the process ends.
     @Test func `flushing writes lines that have not filled a batch`() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        try await withTemporaryDirectory { directory in
+            Logbook.bootstrap(
+                subsystem: "com.example.Bootstrap",
+                configuration: Logbook.Configuration(
+                    minimumLevel: .trace,
+                    files: .init(directory: directory, flushThreshold: 100))
+            )
+            Log("Quiet").error("one lonely line")
 
-        Logbook.bootstrap(
-            subsystem: "com.example.Bootstrap",
-            configuration: Logbook.Configuration(
-                minimumLevel: .trace,
-                files: .init(directory: directory, flushThreshold: 100))
-        )
-        Log("Quiet").error("one lonely line")
+            await Logbook.flush()
 
-        await Logbook.flush()
-
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-        let contents = try String(contentsOf: #require(files.first), encoding: .utf8)
-        #expect(contents.contains("one lonely line"))
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            let contents = try String(contentsOf: #require(files.first), encoding: .utf8)
+            #expect(contents.contains("one lonely line"))
+        }
     }
 }
